@@ -55,11 +55,11 @@ def main(
 def ingest_cmd(
     mw: Optional[str] = typer.Option(
         None, "--mw", metavar="PATH",
-        help="Path to Monier-Williams XML file.",
+        help="Path to Monier-Williams .txt file (CDSL format).",
     ),
     apte: Optional[str] = typer.Option(
         None, "--apte", metavar="PATH",
-        help="Path to Apte XML file.",
+        help="Path to Apte ap90.txt file (CDSL format).",
     ),
     verbose: bool = typer.Option(True, "--verbose/--quiet"),
 ) -> None:
@@ -76,14 +76,14 @@ def ingest_cmd(
     mw_path: Optional[Path] = None
     if mw:
         mw_path = Path(mw)
-    elif (data_dir / "mw.xml").exists():
-        mw_path = data_dir / "mw.xml"
+    elif (data_dir / "mw.txt").exists():
+        mw_path = data_dir / "mw.txt"
 
     apte_path: Optional[Path] = None
     if apte:
         apte_path = Path(apte)
-    elif (data_dir / "apte.xml").exists():
-        apte_path = data_dir / "apte.xml"
+    elif (data_dir / "ap90.txt").exists():
+        apte_path = data_dir / "ap90.txt"
 
     if not mw_path and not apte_path:
         typer.echo(
