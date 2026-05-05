@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from textual import events, on
+from rich.markup import escape
+from textual import events
 from textual.app import ComposeResult
 from textual.binding import Binding
+from textual.containers import ScrollableContainer
 from textual.screen import Screen
 from textual.widgets import Footer, Header, Static
-from textual.containers import ScrollableContainer
 
 from vedabhyas.search.fts import SearchResult
 
@@ -16,8 +17,6 @@ class ReadScreen(Screen):
         Binding("n", "next_entry", "Next", show=True),
         Binding("p", "prev_entry", "Prev", show=True),
         Binding("y", "yank", "Copy headword", show=True),
-        Binding("j,down", "scroll_down", "Down", show=False),
-        Binding("k,up", "scroll_up", "Up", show=False),
     ]
 
     CSS = """
@@ -63,24 +62,26 @@ class ReadScreen(Screen):
             self.query_one("#entry-content", Static).update(self._format_entry(entry))
 
     def _format_entry(self, entry: dict) -> str:
-        hw = entry.get("headword_iast") or ""
-        deva = entry.get("headword_devanagari") or ""
+        # All dynamic content is escape()d before insertion into Rich markup
+        # to prevent CDSL source citations like [BhP.] from being parsed as tags
+        hw     = escape(entry.get("headword_iast") or "")
+        deva   = escape(entry.get("headword_devanagari") or "")
         source = (entry.get("source_dict") or "").upper()
-        gender = entry.get("grammar_gender") or ""
-        pos = entry.get("grammar_pos") or ""
-        cls = entry.get("grammar_class") or ""
-        root = entry.get("root_dhatu_iast") or ""
-        meaning = entry.get("meaning_full") or ""
-        etymology = entry.get("etymology") or ""
+        gender = escape(entry.get("grammar_gender") or "")
+        pos    = escape(entry.get("grammar_pos") or "")
+        cls    = escape(entry.get("grammar_class") or "")
+        root   = escape(entry.get("root_dhatu_iast") or "")
+        meaning    = escape(entry.get("meaning_full") or "")
+        etymology  = escape(entry.get("etymology") or "")
         cross_refs = entry.get("cross_refs") or []
 
         lines: list[str] = []
 
-        # Header: headword + optional Devanagari + source badge
+        # Header
         header = f"[bold white]{hw}[/bold white]"
         if self._show_devanagari and deva:
             header += f"  [bold yellow]{deva}[/bold yellow]"
-        header += f"  [bold cyan on $surface-darken-1] {source} [/bold cyan on $surface-darken-1]"
+        header += f"  [bold cyan] {source} [/bold cyan]"
         lines.append(header)
 
         # Grammar line
@@ -98,29 +99,23 @@ class ReadScreen(Screen):
 
         lines.append("[dim]" + "─" * 60 + "[/dim]")
 
-        # Meaning body
-        if meaning:
-            lines.append(meaning)
-        else:
-            lines.append("[dim](no definition)[/dim]")
+        lines.append(meaning if meaning else "[dim](no definition)[/dim]")
 
-        # Etymology
         if etymology:
             lines.append("")
             lines.append(f"[italic dim]Etymology: {etymology}[/italic dim]")
 
-        # Cross-references
         if cross_refs:
             refs_text = ", ".join(
-                r.get("to_headword_iast", "") for r in cross_refs if r.get("to_headword_iast")
+                escape(r.get("to_headword_iast", ""))
+                for r in cross_refs
+                if r.get("to_headword_iast")
             )
             if refs_text:
                 lines.append(f"[italic dim]See also: {refs_text}[/italic dim]")
 
-        # Nav hint
-        pos_info = f"{self._current_index + 1}/{len(self._results)}"
         lines.append("")
-        lines.append(f"[dim]── {pos_info} ──[/dim]")
+        lines.append(f"[dim]── {self._current_index + 1}/{len(self._results)} ──[/dim]")
 
         return "\n".join(lines)
 
@@ -143,12 +138,6 @@ class ReadScreen(Screen):
             self._entry_id = r.id
             self._load_entry(r.id)
 
-    def action_scroll_down(self) -> None:
-        self.query_one("#entry-scroll", ScrollableContainer).scroll_down()
-
-    def action_scroll_up(self) -> None:
-        self.query_one("#entry-scroll", ScrollableContainer).scroll_up()
-
     def action_yank(self) -> None:
         try:
             import pyperclip
@@ -160,12 +149,12 @@ class ReadScreen(Screen):
         except Exception as exc:
             self.notify(f"Copy failed: {exc}", severity="error")
 
-    # ── Keyboard passthrough for j/k ─────────────────────────────────
-
+    # j/k and arrow keys for scrolling
     def on_key(self, event: events.Key) -> None:
+        scroll = self.query_one("#entry-scroll", ScrollableContainer)
         if event.key in ("j", "down"):
-            self.action_scroll_down()
+            scroll.scroll_down()
             event.stop()
         elif event.key in ("k", "up"):
-            self.action_scroll_up()
+            scroll.scroll_up()
             event.stop()

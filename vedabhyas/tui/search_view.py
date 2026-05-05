@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import sqlite3
 
+from rich.markup import escape
 from textual import events, on
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.screen import Screen
 from textual.timer import Timer
 from textual.widgets import Footer, Input, Label, ListItem, ListView
+from textual import work
 
 from vedabhyas.search.fts import SearchResult, search
 from vedabhyas.search.fuzzy import search_fuzzy
@@ -66,9 +68,8 @@ class SearchScreen(Screen):
         self._search_timer: Timer | None = None
 
     def compose(self) -> ComposeResult:
-        badge = self._dict_badge()
         yield Input(placeholder="Search: IAST, Harvard-Kyoto, ASCII, or Devanagari…", id="search-input")
-        yield Label(badge, id="dict-badge")
+        yield Label(self._dict_badge(), id="dict-badge")
         yield ListView(id="results-list")
         yield Footer()
 
@@ -85,46 +86,61 @@ class SearchScreen(Screen):
         if not query.strip():
             self._update_results([])
             return
-        self._search_timer = self.set_timer(0.15, lambda: self._run_search(query))
+        self._search_timer = self.set_timer(
+            0.15, lambda: self._run_search(query))
 
+    @work(thread=True)
     def _run_search(self, query: str) -> None:
         results = search(self._db, query, self._source_dict)
         if not results:
             results = search_fuzzy(self._db, query, self._source_dict)
-        self._results = results
-        self._update_results(results)
+        self.app.call_from_thread(self._update_results, results)
 
     def _update_results(self, results: list[SearchResult]) -> None:
+        self._results = results
         lv = self.query_one("#results-list", ListView)
         lv.clear()
         for r in results:
-            lv.append(ListItem(Label(self._format_result(r)), id=f"entry-{r.id}"))
+            lv.append(ListItem(Label(self._format_result(r))))
 
     @staticmethod
     def _format_result(r: SearchResult) -> str:
+        # escape() prevents CDSL source citations like [BhP.] from being
+        # misread as Rich markup tags
         source_badge = f"[bold cyan]{r.source_dict.upper()}[/bold cyan]"
         grammar = " · ".join(p for p in [r.grammar_gender, r.grammar_pos] if p)
-        line1 = f"[bold]{r.headword_iast}[/bold]  {source_badge}"
+        line1 = f"[bold]{escape(r.headword_iast)}[/bold]  {source_badge}"
         if grammar:
-            line1 += f"  [dim]{grammar}[/dim]"
+            line1 += f"  [dim]{escape(grammar)}[/dim]"
         if r.meaning_short:
-            snippet = r.meaning_short[:90]
+            snippet = escape(r.meaning_short[:90])
             if len(r.meaning_short) > 90:
                 snippet += "…"
             return f"{line1}\n  [italic dim]{snippet}[/italic dim]"
         return line1
 
-    # ── Key navigation (vim-style when input not focused) ─────────────
+    # ── Key navigation ────────────────────────────────────────────────
+    # down/up: Input does not consume these, so they bubble to Screen.
+    #          Handle them here only when Input has focus (ListView handles
+    #          them natively via its own BINDINGS when it has focus, so they
+    #          never reach Screen in that case).
+    # j/k:     Input DOES consume j/k (types the char), so Screen only sees
+    #          them when Input is NOT focused — no guard needed beyond that.
 
     def on_key(self, event: events.Key) -> None:
-        inp = self.query_one(Input)
         lv = self.query_one(ListView)
-        if inp.has_focus:
-            return
-        if event.key in ("j", "down"):
+        inp = self.query_one(Input)
+
+        if event.key == "down" and inp.has_focus:
             lv.action_cursor_down()
             event.stop()
-        elif event.key in ("k", "up"):
+        elif event.key == "up" and inp.has_focus:
+            lv.action_cursor_up()
+            event.stop()
+        elif event.key == "j" and not inp.has_focus:
+            lv.action_cursor_down()
+            event.stop()
+        elif event.key == "k" and not inp.has_focus:
             lv.action_cursor_up()
             event.stop()
 
@@ -140,12 +156,13 @@ class SearchScreen(Screen):
             self._open_entry(lv.highlighted_child)
 
     def _open_entry(self, item: ListItem) -> None:
-        if item.id and item.id.startswith("entry-"):
-            entry_id = int(item.id[6:])
-            idx = next((i for i, r in enumerate(self._results) if r.id == entry_id), 0)
+        lv = self.query_one(ListView)
+        idx = lv.index
+        if idx is not None and 0 <= idx < len(self._results):
+            r = self._results[idx]
             from vedabhyas.tui.read_view import ReadScreen
             self.app.push_screen(
-                ReadScreen(entry_id, self._results, idx, self._show_devanagari)
+                ReadScreen(r.id, self._results, idx, self._show_devanagari)
             )
 
     # ── Dict cycling ──────────────────────────────────────────────────
@@ -163,7 +180,8 @@ class SearchScreen(Screen):
             self._run_search(query)
 
     def _dict_badge(self) -> str:
-        label = {None: "MW + Apte", "mw": "Monier-Williams only", "apte": "Apte only"}
+        label = {None: "MW + Apte",
+                 "mw": "Monier-Williams only", "apte": "Apte only"}
         return f"[dim]Dict:[/dim] {label.get(self._source_dict, 'MW + Apte')}"
 
     def action_quit(self) -> None:
