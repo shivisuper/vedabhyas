@@ -14,6 +14,7 @@ from vedabhyas.search.fts import SearchResult
 class ReadScreen(Screen):
     BINDINGS = [
         Binding("escape", "go_back", "Back", show=True),
+        Binding("ctrl+q", "quit", "Quit", show=True),
         Binding("n", "next_entry", "Next", show=True),
         Binding("p", "prev_entry", "Prev", show=True),
         Binding("y", "yank", "Copy headword", show=True),
@@ -59,20 +60,21 @@ class ReadScreen(Screen):
         from vedabhyas.data.db import get_entry
         entry = get_entry(self.app._db, entry_id)
         if entry:
-            self.query_one("#entry-content", Static).update(self._format_entry(entry))
+            self.query_one("#entry-content",
+                           Static).update(self._format_entry(entry))
 
     def _format_entry(self, entry: dict) -> str:
         # All dynamic content is escape()d before insertion into Rich markup
         # to prevent CDSL source citations like [BhP.] from being parsed as tags
-        hw     = escape(entry.get("headword_iast") or "")
-        deva   = escape(entry.get("headword_devanagari") or "")
+        hw = escape(entry.get("headword_iast") or "")
+        deva = escape(entry.get("headword_devanagari") or "")
         source = (entry.get("source_dict") or "").upper()
         gender = escape(entry.get("grammar_gender") or "")
-        pos    = escape(entry.get("grammar_pos") or "")
-        cls    = escape(entry.get("grammar_class") or "")
-        root   = escape(entry.get("root_dhatu_iast") or "")
-        meaning    = escape(entry.get("meaning_full") or "")
-        etymology  = escape(entry.get("etymology") or "")
+        pos = escape(entry.get("grammar_pos") or "")
+        cls = escape(entry.get("grammar_class") or "")
+        root = escape(entry.get("root_dhatu_iast") or "")
+        meaning = escape(entry.get("meaning_full") or "")
+        etymology = escape(entry.get("etymology") or "")
         cross_refs = entry.get("cross_refs") or []
 
         lines: list[str] = []
@@ -115,11 +117,15 @@ class ReadScreen(Screen):
                 lines.append(f"[italic dim]See also: {refs_text}[/italic dim]")
 
         lines.append("")
-        lines.append(f"[dim]── {self._current_index + 1}/{len(self._results)} ──[/dim]")
+        lines.append(f"[dim]── {self._current_index +
+                     1}/{len(self._results)} ──[/dim]")
 
         return "\n".join(lines)
 
     # ── Actions ───────────────────────────────────────────────────────
+
+    def action_quit(self) -> None:
+        self.app.exit()
 
     def action_go_back(self) -> None:
         self.app.pop_screen()

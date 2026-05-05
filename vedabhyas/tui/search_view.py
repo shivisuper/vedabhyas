@@ -3,13 +3,13 @@ from __future__ import annotations
 import sqlite3
 
 from rich.markup import escape
-from textual import events, on
+from textual import events, on, work
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.screen import Screen
 from textual.timer import Timer
 from textual.widgets import Footer, Input, Label, ListItem, ListView
-from textual import work
+from textual.worker import get_current_worker
 
 from vedabhyas.search.fts import SearchResult, search
 from vedabhyas.search.fuzzy import search_fuzzy
@@ -17,8 +17,7 @@ from vedabhyas.search.fuzzy import search_fuzzy
 
 class SearchScreen(Screen):
     BINDINGS = [
-        Binding("ctrl+c", "quit", "Quit", show=True),
-        Binding("q", "quit", "Quit", show=False),
+        Binding("ctrl+q", "quit", "Quit", show=True),
         Binding("tab", "toggle_dict", "Toggle dict", show=True),
         Binding("enter", "select_result", "Open", show=True),
     ]
@@ -76,6 +75,12 @@ class SearchScreen(Screen):
     def on_mount(self) -> None:
         self.query_one(Input).focus()
 
+    def on_unmount(self) -> None:
+        if self._search_timer is not None:
+            self._search_timer.stop()
+            self._search_timer = None
+        self.workers.cancel_all()
+
     # ── Search input handling ──────────────────────────────────────────
 
     @on(Input.Changed, "#search-input")
@@ -91,10 +96,17 @@ class SearchScreen(Screen):
 
     @work(thread=True)
     def _run_search(self, query: str) -> None:
-        results = search(self._db, query, self._source_dict)
-        if not results:
-            results = search_fuzzy(self._db, query, self._source_dict)
-        self.app.call_from_thread(self._update_results, results)
+        worker = get_current_worker()
+        from vedabhyas.data.db import connect
+        conn = connect()
+        try:
+            results = search(conn, query, self._source_dict)
+            if not results:
+                results = search_fuzzy(conn, query, self._source_dict)
+        finally:
+            conn.close()
+        if not worker.is_cancelled:
+            self.app.call_from_thread(self._update_results, results)
 
     def _update_results(self, results: list[SearchResult]) -> None:
         self._results = results
