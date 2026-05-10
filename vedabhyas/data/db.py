@@ -58,6 +58,31 @@ def db_exists() -> bool:
     return _db_path().exists()
 
 
+def get_entry(conn: sqlite3.Connection, entry_id: int) -> dict | None:
+    row = conn.execute(
+        """
+        SELECT id, headword_iast, headword_devanagari, headword_slp1,
+               grammar_gender, grammar_pos, grammar_class,
+               root_dhatu, root_dhatu_iast,
+               meaning_short, meaning_full, etymology,
+               compound_indicator, source_dict, source_entry_id
+        FROM entries WHERE id = ?
+        """,
+        (entry_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    entry = dict(row)
+    entry["cross_refs"] = [
+        dict(r)
+        for r in conn.execute(
+            "SELECT to_headword_iast, ref_type FROM cross_refs WHERE from_entry_id = ?",
+            (entry_id,),
+        )
+    ]
+    return entry
+
+
 def connect(path: Path | None = None) -> sqlite3.Connection:
     if path is None:
         path = _db_path()
