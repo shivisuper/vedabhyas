@@ -12,7 +12,6 @@ build/
 
 # DB and downloaded data
 *.db
-data/
 *.xml
 
 # macOS
